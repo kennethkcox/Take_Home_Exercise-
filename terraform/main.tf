@@ -109,23 +109,15 @@ resource "aws_networkfirewall_rule_group" "egress_rules" {
 
   rule_group {
     rules_source {
-      stateful_rule {
-        action = "DROP"
-        header {
-          protocol          = "ANY"
-          source            = "ANY"
-          source_port       = "ANY"
-          direction         = "FORWARD"
-          destination       = "ANY"
-          destination_port  = "ANY"
-        }
-        rule_option {
-          keyword = "sid:1"
-        }
-      }
+      rules_string = <<-EOT
+      pass tls *.amazonaws.com 443 (msg:"Allow ECR and other AWS services"; flow:to_server; sid:101; rev:1;)
+      pass tls *.docker.io 443 (msg:"Allow Docker Hub"; flow:to_server; sid:102; rev:1;)
+      pass tls *.docker.com 443 (msg:"Allow Docker Hub"; flow:to_server; sid:103; rev:1;)
+      drop any any any -> any any (msg:"Default drop all"; sid:999; rev:1;)
+      EOT
     }
     stateful_rule_options {
-      rule_order = "DEFAULT_ACTION_ORDER"
+      rule_order = "STRICT_ORDER"
     }
   }
 

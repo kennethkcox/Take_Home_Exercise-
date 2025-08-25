@@ -14,7 +14,53 @@ The goal of this project is not merely to deploy an application, but to surround
 
 The platform consists of three key interacting systems: The CI/CD Pipeline for automated deployment, the Edge Security Platform for layered defense, and the Automated Defense Loop for real-time threat response.
 
-![Architecture Diagram](docs/architecture.md)
+```mermaid
+graph TD
+    subgraph "GitHub"
+        direction LR
+        A[Developer] -->|git push| B(GitHub Repo);
+        B -->|Pull Request| C{Edge CI Workflow};
+        C -->|terraform plan| B;
+        B -->|Merge to main| D{Edge CD Workflow};
+    end
+
+    subgraph "AWS Account"
+        direction TB
+
+        subgraph "CI/CD Pipeline"
+            D --> E[Terraform Apply];
+        end
+
+        subgraph "Edge Security Platform"
+            direction LR
+            F[Internet] --> G(CloudFront);
+            G --> H(Lambda@Edge);
+            H --> I(AWS WAF);
+            I --> J[Application Load Balancer];
+        end
+
+        subgraph "Application"
+            J --> K(ECS Fargate);
+            K --> L[Juice Shop Container];
+        end
+
+        subgraph "Automated Defense Loop"
+            direction TB
+            I -->|Logs| M(Kinesis Firehose);
+            M --> N[S3 Bucket];
+            N -->|Logs| O(CloudWatch Logs);
+            O -->|Metric Filter| P(CloudWatch Alarm);
+            P -->|Trigger| Q(SNS Topic);
+            Q -->|Invoke| R{Auto-Block Lambda};
+            R -->|UpdateIPSet| I;
+        end
+    end
+
+    style C fill:#00A4EF,stroke:#333,stroke-width:2px
+    style D fill:#00A4EF,stroke:#333,stroke-width:2px
+    style R fill:#FF9900,stroke:#333,stroke-width:2px
+    style H fill:#FF9900,stroke:#333,stroke-width:2px
+```
 
 ---
 
@@ -40,14 +86,12 @@ The platform consists of three key interacting systems: The CI/CD Pipeline for a
 
 ## Getting Started
 
-### Prerequisites
+For a detailed, step-by-step walkthrough of how to fork, configure, and deploy this project for the first time, please see the:
 
-*   An AWS Account.
-*   A GitHub repository with the secrets `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` configured for the deployment workflows. (For a production system, it is highly recommended to use OIDC).
-*   Terraform `~> 1.2.0` and Go `~> 1.18` for local testing.
+**[➡️ Foolproof Deployment Guide](docs/FOOLPROOF_GUIDE.md)**
 
-### Deployment
+### Quick Summary
 
-The deployment is fully automated. Simply create a pull request with a change to the `terraform/` directory and merge it to `main` after the CI checks pass. The CD workflow will handle the rest.
-
-For details on running the scripts and understanding the operational aspects, see the original [runbook-style README](docs/original_readme.md).
+*   **Prerequisites:** You will need an AWS account and a GitHub account.
+*   **Configuration:** You must add `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `INFRACOST_API_KEY` as secrets to your forked repository.
+*   **Deployment:** The deployment is fully automated via a GitOps workflow. All changes are made through Pull Requests, which are automatically tested. Merging a PR to the `main` branch will trigger the Continuous Deployment workflow.
