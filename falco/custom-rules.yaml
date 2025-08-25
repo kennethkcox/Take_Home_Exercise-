@@ -1,0 +1,9 @@
+# Custom Falco rules can be added here.
+# For example, to detect if a shell is run in a container:
+#
+# - rule: Terminal shell in container
+#   desc: A shell was used in the container, which is suspicious.
+#   condition: evt.type = execve and evt.dir = < and container.id != host and proc.name = sh
+#   output: "Shell in container (user=%user.name container_id=%container.id)"
+#   priority: WARNING
+#   tags: [shell]

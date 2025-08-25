@@ -91,6 +91,23 @@ jobs:
           echo "Terraform Plan Failed!"
           exit 1
 
+      - name: 'Setup Infracost'
+        uses: infracost/actions/setup@v2
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: 'Infracost Breakdown'
+        run: infracost breakdown --path=./terraform --format=json --out-file=/tmp/infracost-base.json
+
+      - name: 'Infracost Diff'
+        run: infracost diff --path=./terraform --format=json --compare-to=/tmp/infracost-base.json --out-file=/tmp/infracost.json
+
+      - name: 'Post Infracost Comment'
+        uses: infracost/actions/comment@v2
+        with:
+          path: /tmp/infracost.json
+          behavior: update
+
       - name: 'Manual Approval Gate (Conceptual)'
         if: success()
         run: |

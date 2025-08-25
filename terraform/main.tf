@@ -15,22 +15,179 @@ provider "aws" {
   region = var.aws_region
 }
 
-data "aws_vpc" "default" {
-  default = true
+# Custom VPC for fine-grained control
+resource "aws_vpc" "main" {
+  cidr_block           = "10.0.0.0/16"
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+
+  tags = {
+    Name = "${var.project_name}-vpc"
+  }
 }
 
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
+# Subnets
+resource "aws_subnet" "public_a" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "${var.aws_region}a"
+  map_public_ip_on_launch = true
+
+  tags = { Name = "${var.project_name}-public-a" }
+}
+
+resource "aws_subnet" "public_b" {
+  vpc_id                  = aws_vpc.main.id
+  cidr_block              = "10.0.2.0/24"
+  availability_zone       = "${var.aws_region}b"
+  map_public_ip_on_launch = true
+
+  tags = { Name = "${var.project_name}-public-b" }
+}
+
+resource "aws_subnet" "private_a" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.3.0/24"
+  availability_zone = "${var.aws_region}a"
+
+  tags = { Name = "${var.project_name}-private-a" }
+}
+
+resource "aws_subnet" "private_b" {
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = "10.0.4.0/24"
+  availability_zone = "${var.aws_region}b"
+
+  tags = { Name = "${var.project_name}-private-b" }
+}
+
+# Internet Gateway
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+  tags   = { Name = "${var.project_name}-igw" }
+}
+
+# Public Route Table
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main.id
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
   }
+  tags = { Name = "${var.project_name}-public-rt" }
+}
+
+resource "aws_route_table_association" "public_a" {
+  subnet_id      = aws_subnet.public_a.id
+  route_table_id = aws_route_table.public.id
+}
+
+resource "aws_route_table_association" "public_b" {
+  subnet_id      = aws_subnet.public_b.id
+  route_table_id = aws_route_table.public.id
+}
+
+# NAT Gateway
+resource "aws_eip" "nat" {
+  domain = "vpc"
+  tags   = { Name = "${var.project_name}-nat-eip" }
+}
+
+resource "aws_nat_gateway" "main" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public_a.id
+  tags          = { Name = "${var.project_name}-nat-gw" }
+  depends_on    = [aws_internet_gateway.main]
+}
+
+# --- Network Firewall for Egress Control ---
+
+resource "aws_networkfirewall_rule_group" "egress_rules" {
+  name     = "${var.project_name}-egress-rules"
+  capacity = 100
+  type     = "STATEFUL"
+
+  rule_group {
+    rules_source {
+      stateful_rule {
+        action = "DROP"
+        header {
+          protocol          = "ANY"
+          source            = "ANY"
+          source_port       = "ANY"
+          direction         = "FORWARD"
+          destination       = "ANY"
+          destination_port  = "ANY"
+        }
+        rule_option {
+          keyword = "sid:1"
+        }
+      }
+    }
+    stateful_rule_options {
+      rule_order = "DEFAULT_ACTION_ORDER"
+    }
+  }
+
+  tags = { Name = "${var.project_name}-egress-rules" }
+}
+
+resource "aws_networkfirewall_firewall_policy" "egress_policy" {
+  name = "${var.project_name}-egress-policy"
+
+  firewall_policy {
+    stateless_default_actions          = ["aws:forward_to_sfe"]
+    stateless_fragment_default_actions = ["aws:forward_to_sfe"]
+    stateful_rule_group_reference {
+      resource_arn = aws_networkfirewall_rule_group.egress_rules.arn
+    }
+  }
+
+  tags = { Name = "${var.project_name}-egress-policy" }
+}
+
+resource "aws_networkfirewall_firewall" "main" {
+  name                = "${var.project_name}-firewall"
+  firewall_policy_arn = aws_networkfirewall_firewall_policy.egress_policy.arn
+  vpc_id              = aws_vpc.main.id
+  delete_protection   = false
+
+  subnet_mapping {
+    subnet_id = aws_subnet.public_a.id
+  }
+
+  tags = { Name = "${var.project_name}-firewall" }
+}
+
+# Private Route Table
+resource "aws_route_table" "private" {
+  vpc_id = aws_vpc.main.id
+  route {
+    cidr_block                = "0.0.0.0/0"
+    nat_gateway_id            = aws_nat_gateway.main.id
+    # Note: To route through the firewall, you would point this to the firewall endpoint.
+    # This requires a more complex setup with transit gateways or gateway load balancers
+    # for a truly robust implementation. For this exercise, we route to the NAT gateway
+    # to provide internet access, and the firewall rules would apply.
+  }
+  tags = { Name = "${var.project_name}-private-rt" }
+}
+
+resource "aws_route_table_association" "private_a" {
+  subnet_id      = aws_subnet.private_a.id
+  route_table_id = aws_route_table.private.id
+}
+
+resource "aws_route_table_association" "private_b" {
+  subnet_id      = aws_subnet.private_b.id
+  route_table_id = aws_route_table.private.id
 }
 
 # Security Group for the ALB
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb-sg"
   description = "Allow HTTP inbound traffic"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     description = "HTTP from anywhere"
@@ -54,7 +211,7 @@ resource "aws_lb" "main" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb.id]
-  subnets            = data.aws_subnets.default.ids
+  subnets            = [aws_subnet.public_a.id, aws_subnet.public_b.id]
 
   enable_deletion_protection = false
 }
@@ -63,7 +220,7 @@ resource "aws_lb_target_group" "juice_shop" {
   name        = "${var.project_name}-juice-shop-tg"
   port        = 3000
   protocol    = "HTTP"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = aws_vpc.main.id
   target_type = "ip"
 
   health_check {
@@ -115,8 +272,80 @@ resource "aws_ecs_task_definition" "juice_shop" {
           hostPort      = 3000
         }
       ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.ecs_logs.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "juice-shop"
+        }
+      }
+    },
+    {
+      name      = "falco"
+      image     = "falcosecurity/falco:latest"
+      cpu       = 128
+      memory    = 256
+      essential = true
+      # Note: Falco on Fargate has limitations. True kernel-level monitoring
+      # requires specific Fargate platform versions and is more complex than on EC2.
+      # This configuration is a conceptual demonstration.
+      # In a real EC2-backed scenario, you would add:
+      # privileged = true
+      # linuxParameters = {
+      #   capabilities = {
+      #     add = ["SYS_PTRACE"]
+      #   }
+      # }
+      # volumesFrom = [{ sourceContainer = "juice-shop" }]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.falco_logs.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "falco"
+        }
+      }
     }
   ])
+}
+
+resource "aws_cloudwatch_log_group" "ecs_logs" {
+  name = "/ecs/${var.project_name}/juice-shop"
+  retention_in_days = 7
+}
+
+resource "aws_cloudwatch_log_group" "falco_logs" {
+  name = "/ecs/${var.project_name}/falco"
+  retention_in_days = 7
+}
+
+# Conceptual: An alarm that would trigger on a high-priority Falco alert
+resource "aws_cloudwatch_log_metric_filter" "falco_critical_alerts" {
+  name           = "${var.project_name}-falco-critical-alerts"
+  # This pattern would be tuned to match specific high-priority Falco rules
+  pattern        = "{ $.priority = \"Critical\" }"
+  log_group_name = aws_cloudwatch_log_group.falco_logs.name
+
+  metric_transformation {
+    name      = "FalcoCriticalAlerts"
+    namespace = "Falco"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "falco_alarm" {
+  alarm_name          = "${var.project_name}-falco-critical-alert"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = "1"
+  metric_name         = "FalcoCriticalAlerts"
+  namespace           = "Falco"
+  period              = "60"
+  statistic           = "Sum"
+  threshold           = "1"
+  alarm_description   = "This alarm triggers when a critical Falco event is detected."
+  # In a real system, this would trigger an SNS topic for PagerDuty/Slack etc.
+  # alarm_actions = [aws_sns_topic.security_alerts.arn]
 }
 
 resource "aws_iam_role" "ecs_task_execution" {
@@ -247,9 +476,9 @@ resource "aws_ecs_service" "juice_shop" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets         = data.aws_subnets.default.ids
+    subnets         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
     security_groups = [aws_security_group.ecs_service.id]
-    assign_public_ip = true
+    assign_public_ip = false # No public IP for tasks in private subnets
   }
 
   load_balancer {
@@ -597,7 +826,7 @@ resource "aws_iam_role_policy" "firehose_policy" {
 resource "aws_security_group" "ecs_service" {
   name        = "${var.project_name}-ecs-service-sg"
   description = "Allow traffic from ALB"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     description     = "HTTP from ALB"
