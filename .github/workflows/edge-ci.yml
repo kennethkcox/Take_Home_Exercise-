@@ -1,0 +1,87 @@
+name: 'Edge Security CI'
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'terraform/**'
+
+jobs:
+  terraform-ci:
+    name: 'Terraform CI'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@v3
+
+      - name: 'Setup Terraform'
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: '1.2.0' # Specify a version
+
+      - name: 'Terraform Init'
+        id: init
+        run: terraform -chdir=./terraform init
+        # In a real pipeline, you would configure credentials here
+        # env:
+        #   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        #   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: 'Terraform Validate'
+        id: validate
+        run: terraform -chdir=./terraform validate -no-color
+
+      - name: 'Terraform Plan'
+        id: plan
+        run: terraform -chdir=./terraform plan -no-color -out=tfplan
+        # In a real pipeline, you would configure credentials here
+        # env:
+        #   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        #   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        continue-on-error: true # Allow plan to fail without stopping the workflow
+
+      - name: 'tfsec'
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: ./terraform
+
+      - name: 'Format Plan'
+        id: format-plan
+        run: |
+          plan_output=$(terraform -chdir=./terraform show -no-color tfplan)
+          echo "plan<<EOF" >> $GITHUB_OUTPUT
+          echo "$plan_output" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 'Post Plan to PR'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### Terraform Plan 📜\n\n<details><summary>Show Plan</summary>\n\n\`\`\`terraform\n${{ steps.format-plan.outputs.plan }}\n\`\`\`\n\n</details>\n\n*Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: 'Terraform Plan Status'
+        if: steps.plan.outcome == 'failure'
+        run: |
+          echo "Terraform Plan Failed!"
+          exit 1
+
+      - name: 'Manual Approval Gate (Conceptual)'
+        if: success()
+        run: |
+          echo "-----------------------------------------------------"
+          echo "✅ Terraform Plan and Security Scan Successful"
+          echo "-----------------------------------------------------"
+          echo "Waiting for manual approval to apply..."
+          echo "In a real workflow, this step would use an environment with a"
+          echo "protection rule requiring a reviewer to approve the deployment."
+          echo "-----------------------------------------------------"

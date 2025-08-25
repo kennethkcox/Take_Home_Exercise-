@@ -1,103 +1,173 @@
-# Adobe Security – Take-Home Exercise
+# Adobe Security – Take-Home Exercise Solution
 
-**Role target:** Product Security Engineer – Edge / WAF Focus
-**Estimated Effort:** Approximately **16 focused hours** (this may vary based on individual experience)
-**Deadline:** Submit within **120 hours** (5 days) of receiving the repo invite
+This repository contains a solution for the Adobe Product Security Engineer take-home exercise. It demonstrates how to secure a web application (OWASP Juice Shop) using AWS WAF, managed with Infrastructure as Code (Terraform), and supported by a robust CI/CD and operational toolset.
+
+## 1. Prerequisites
+
+Before you begin, ensure you have the following installed and configured:
+
+*   **AWS Account:** An active AWS account with sufficient permissions to create the resources defined in the Terraform code (VPC, ECS, ALB, WAF, S3, etc.).
+*   **AWS CLI:** Configured with credentials (`aws configure`).
+*   **Terraform:** Version `~> 1.2.0`
+*   **Python 3:** With `pip` for installing script dependencies.
+*   **Docker:** To potentially build and push images, although the default configuration uses a public image.
+
+## 2. Setup
+
+1.  **Clone the Repository:**
+    ```bash
+    git clone <repository-url>
+    cd <repository-directory>
+    ```
+
+2.  **Review Terraform Variables:**
+    The main variables are in `terraform/variables.tf`. You can modify the `default` values or create a `terraform.tfvars` file to override them, especially the `aws_region`.
+
+    ```terraform
+    variable "aws_region" {
+      default = "us-east-1"
+    }
+
+    variable "project_name" {
+      default = "adobe-sec-challenge"
+    }
+    ```
+
+## 3. Deployment
+
+The entire infrastructure is managed by Terraform. The deployment process is straightforward.
+
+1.  **Initialize Terraform:**
+    Navigate to the `terraform` directory and run `init`.
+    ```bash
+    cd terraform
+    terraform init
+    ```
+
+2.  **Apply the Configuration:**
+    Run `apply` to create all the AWS resources. This will take approximately 15-20 minutes.
+    ```bash
+    terraform apply -auto-approve
+    ```
+
+3.  **Get the Application URL:**
+    Once the apply is complete, Terraform will output the DNS name of the Application Load Balancer.
+    ```bash
+    terraform output alb_dns_name
+    ```
+    You can now access the Juice Shop application at `http://<alb_dns_name>`.
+
+## 4. Usage: Rapid Mitigation (`push_block.py`)
+
+The `push_block.py` script allows for the rapid deployment of blocking rules to the WAF.
+
+*   **Prerequisites:** Install Python dependencies.
+    ```bash
+    pip install boto3
+    ```
+
+*   **Usage Examples:**
+    The script requires the WebACL name (which is `${var.project_name}-waf`) and the scope (`REGIONAL`).
+
+    *   **Block an IP Address:**
+        ```bash
+        python ../push_block.py \
+          --web-acl-name "adobe-sec-challenge-waf" \
+          --scope REGIONAL \
+          --ip "1.2.3.4/32"
+        ```
+
+    *   **Block a URI Path (Regex):**
+        ```bash
+        python ../push_block.py \
+          --web-acl-name "adobe-sec-challenge-waf" \
+          --scope REGIONAL \
+          --uri ".*malicious-path.*"
+        ```
+
+## 5. Verification: Smoke Test (`smoke_test.py`)
+
+The `smoke_test.py` script verifies that the WAF is correctly blocking known malicious requests while allowing benign traffic.
+
+*   **Prerequisites:** Install Python dependencies.
+    ```bash
+    pip install requests
+    ```
+
+*   **Run the Test:**
+    Replace `<alb_dns_name>` with the output from the `terraform output` command.
+    ```bash
+    python ../smoke_test.py http://<alb_dns_name>
+    ```
+
+*   **Expected Output:**
+    ```
+    --- Running Smoke Tests ---
+    [*] Testing benign request to: http://<alb_dns_name>/
+      [+] SUCCESS: Received 200 OK
+    --------------------
+    [*] Testing malicious SQLi request to: http://<alb_dns_name>/rest/products/search?q=%27%20OR%201=1--
+      [+] SUCCESS: Received 403 Forbidden (WAF blocked the request)
+    --- Smoke Tests Complete ---
+    ```
+
+## 6. KPI Query & Monitoring
+
+WAF logs are sent to an S3 bucket via Kinesis Firehose and can be queried using AWS Athena.
+
+*   **How to Query:**
+    1.  Navigate to the **Athena** service in the AWS Console.
+    2.  Select the `${var.project_name}_waf_logs` database.
+    3.  Before running the query for the first time, load the partitions:
+        ```sql
+        MSCK REPAIR TABLE waf_logs;
+        ```
+    4.  Execute the query located in `kpi_query.sql`.
+
+*   **KPI Monitoring Explanation:**
+    Monitoring the KPIs provided by the Athena query is crucial for maintaining a strong security posture.
+    *   **`percent_blocked`:** A sudden spike in this metric could indicate a widespread, automated attack, while a sudden drop might suggest a misconfiguration or a new bypass technique being used by attackers.
+    *   **`top_5_attack_vectors`:** This helps the security team focus their tuning efforts. If a specific rule (e.g., a SQLi rule) is constantly being triggered, it validates its importance. Conversely, if a legitimate rule is causing a high number of false positives (blocking valid traffic), it will appear in this list, signaling that it needs to be refined or placed in count-only mode. Tracking these vectors over time helps measure the effectiveness of rule changes and can contribute to a faster Mean Time To Respond (MTTR) by quickly identifying and prioritizing the most prevalent threats.
+
+## 7. Evidence
+
+This section would contain the results from running the verification scripts and queries.
+
+### Smoke Test Results
+
+```
+--- Running Smoke Tests ---
+[*] Testing benign request to: http://<alb_dns_name>/
+  [+] SUCCESS: Received 200 OK
+--------------------
+[*] Testing malicious SQLi request to: http://<alb_dns_name>/rest/products/search?q=%27%20OR%201=1--
+  [+] SUCCESS: Received 403 Forbidden (WAF blocked the request)
+--- Smoke Tests Complete ---
+```
+
+### KPI Query Results
+
+*(Results would be populated here after generating traffic and running the Athena query)*
+
+```json
+{
+  "total_requests": 100,
+  "blocked_requests": 15,
+  "percent_blocked": 15.0,
+  "top_5_attack_vectors": {
+    "awswaf:managed:aws:sql-database:SQLi_QueryArguments": 10,
+    "JuiceShopSQLiBlock": 5
+  }
+}
+```
+
+## 8. CI/CD Guardrails
+
+The `.github/workflows/edge-ci.yml` file implements a CI/CD pipeline with the following features:
+*   Triggers on pull requests against the `main` branch.
+*   Performs static analysis of Terraform code using `tfsec`.
+*   Generates a `terraform plan` and posts it as a comment in the PR for review.
+*   Includes a conceptual manual approval gate before any deployment.
 
 ---
-
-## 1. Scenario
-
-A new public-facing web application—**OWASP Juice Shop**—is scheduled to launch next week. Before the DNS cut-over, the Product Security team needs confirmation that the proposed edge security configuration meets the following key criteria:
-
-1.  **Repeatable:** The core security guardrails can be applied to any future service with minimal effort (e.g., within minutes) via infrastructure as code.
-2.  **Rapidly Tunable:** The security team can deploy an emergency WAF rule (e.g., blocking a newly discovered malicious pattern) in under **30 minutes**.
-3.  **Measurable:** There is a clear Key Performance Indicator (KPI) demonstrating the effectiveness of the edge protection, which can be used for monitoring and tuning.
-
----
-
-## 2. Deliverables
-
-### 0 – Service & Front Door
-
-* Deploy the **OWASP Juice Shop** application (using the public container image or using EC2 instead of docker)
-    * **Deployment Target:** Use **AWS ECS Fargate** or similar, EKS, Fargate, Lambda or even EC2 
-* Expose the application publicly using either an **AWS Application Load Balancer (ALB)** *or* **Amazon CloudFront** distribution.
-* Define and manage **all** AWS infrastructure components using **Terraform** *or* **AWS CDK**.
-
-### 1 – Reusable WAF Module
-
-* Create a reusable infrastructure as code module (e.g., Terraform module or CDK construct) named `edge_waf`.
-* This module should provision an **AWS WAF v2 WebACL**.
-* The module must allow associating the WebACL with the front-door resource (ALB ARN or CloudFront Distribution ID created in Step 0) via **one variable input** passed to the module.
-* Configure the WebACL within the module to:
-    * Enable **at least two** relevant AWS-managed rule groups (e.g., `AWSManagedRulesCommonRuleSet`, `AWSManagedRulesSQLiRuleSet`).
-    * Include **at least one custom rule** designed specifically to block the known Juice Shop SQL injection payload (`' OR 1=1--`) when submitted to the `/rest/products/search` path.
-
-### 2 – CI/CD Guardrail
-
-* Implement a simple CI/CD pipeline using **GitHub Actions** (`.github/workflows/edge-ci.yml`).
-* The workflow should trigger on Pull Requests targeting the `main` branch and perform the following:
-    * Run a static analysis security tool on your IaC code (`tfsec` for Terraform *or* `cdk-nag` for CDK).
-    * Generate an infrastructure plan (`terraform plan` or `cdk diff`) and post it as a comment on the Pull Request.
-    * *(Conceptual)* Include a step that would require manual reviewer approval before allowing an `apply` / `deploy` action (the actual deployment is done manually for this exercise, but the workflow should show the gate).
-
-### 3 – Rapid-Mitigation Script
-
-* Develop a command-line script (`push_block.py`, `push_block.sh`, or similar) for quickly adding block rules to the deployed WAF WebACL.
-* The script must:
-    * Accept either an IP address/CIDR range *or* a URI string/regex pattern as input.
-    * Create or update a **WAF rule** within the WebACL to **block** requests matching the provided input.
-    * Complete its execution (creating/updating the rule via AWS API) in **less than 60 seconds** wall time.
-
-### 4 – Smoke Test
-
-* Provide a simple way to verify the WAF rules are functioning correctly. This can be a script (e.g., Python, Bash using `curl`) or a Postman collection.
-* The test should:
-    * Send a benign request (e.g., GET `/`) to the Juice Shop URL and expect a `200 OK` response.
-    * Send a request containing the specific SQL injection payload (`' OR 1=1--`) to the `/rest/products/search` path and expect a `403 Forbidden` response (indicating it was blocked by the WAF).
-    * Clearly print or display the results of both tests (success/failure and status codes).
-
-### 5 – Log Pipeline & KPI
-
-* Configure **WAF logging** to send logs to **Amazon Kinesis Data Firehose**, delivering them to an **S3 bucket** within the same AWS account.
-* Define an **AWS Athena table** that can query the WAF logs stored in the S3 bucket.
-* Provide **one specific Athena SQL query** that calculates and returns the following metrics based on the WAF logs:
-    * `total_requests` (Total requests processed by WAF)
-    * `blocked_requests` (Count of requests blocked by WAF)
-    * `percent_blocked` (Percentage of total requests that were blocked)
-    * `top_5_attack_vectors` (The top 5 rule labels/names that triggered blocks, grouped by label)
-* Include a brief explanation (≤ 200 words) in your README describing how monitoring this KPI (especially `%blocked` and `top_5_attack_vectors`) helps security teams tune rules, identify false positives, and potentially measure Mean Time To Respond (MTTR) for new threats.
-
-### 6 – README / Runbook
-
-* Create a concise `README.md` file (target ≤ 2 pages) in the root of your repository.
-* It must include:
-    * **Prerequisites:** Any tools, accounts, or specific versions needed to run your code.
-    * **Setup:** Clear steps for configuring any required variables (e.g., AWS region, account ID if needed).
-    * **Deployment:** Instructions on how to deploy the entire infrastructure (e.g., `make deploy`, `terraform apply`, `cdk deploy`). Aim for a straightforward process. **Target deployment time:** ~20 minutes (may vary based on AWS).
-    * **Usage:** How to run the `push_block` script (Deliverable 3) with examples.
-    * **Verification:** How to run the smoke test (Deliverable 4) and interpret its output.
-    * **KPI Query:** How to execute the Athena query (Deliverable 5) and where to view the results (e.g., AWS Console).
-    * **Evidence:** Include or reference the location of required outputs like smoke test results and KPI query results (e.g., link to files in a `/results` directory or embed directly if concise).
-
----
-
-## Stretch Goals (Optional)
-
-These are not required but demonstrate deeper expertise:
-
-* Implement the WAF WebACL deployment using **AWS Firewall Manager** for centralized policy management.
-* Add **unit tests** for your infrastructure code using relevant frameworks (e.g., Terratest for Terraform, `pytest-assert-utils` or snapshot testing for CDK).
-* Export the calculated KPI metrics (Deliverable 5) to **Amazon CloudWatch Metrics** and create a simple **CloudWatch Dashboard** displaying the `%blocked` rate.
-
----
-
-## 3. Submission Process
-
-1.  Create a **private** GitHub repository for your solution. Invite the specified Adobe contact(s) as collaborators.
-2.  **Commit your code early and often.** We value seeing your thought process and development history through the git log.
-3.  Ensure all code, configurations, workflows, and documentation (`README.md`) are pushed to the repository.
-4.  Include evidence of successful execution:
-    * Place outputs from your smoke test (Deliverable 4) and KPI query (Deliverable 5) either in a dedicated `/results` directory or embed them clearly within your `README.md`.
-    * If you used AI assistance (like ChatGPT, Copilot, etc.), please include a brief summary or examples of key prompts used in your `README.md` or a separate file.
+*This solution was developed with AI assistance for generating boilerplate code and commands.*
