@@ -60,15 +60,47 @@ The recommended way to install these tools on Windows is by using the [Chocolate
 
 This is the most critical step. Our automated workflows need credentials to interact with AWS and other services. These are stored securely as GitHub Actions secrets.
 
-### 2.1: Create AWS Credentials
-1.  Log in to your AWS Console.
-2.  Navigate to the **IAM** service.
-3.  Go to **Users** and click **"Add users"**.
-4.  Give the user a name (e.g., `github-actions-deployer`).
-5.  Select **"Access key - Programmatic access"** as the credential type.
-6.  Attach the `AdministratorAccess` policy directly. **Note:** This is for simplicity in this exercise. In a real production environment, you should create a custom policy with the exact, least-privilege permissions required by the Terraform code.
-7.  Click through the tags and user creation steps.
-8.  **IMPORTANT:** On the final screen, you will see the **Access key ID** and the **Secret access key**. Copy these immediately and save them somewhere secure. You will not be able to see the secret key again.
+### 2.1: Create AWS Credentials for Programmatic Access
+
+These steps will guide you through creating a dedicated IAM user with the necessary permissions and credentials for the automated workflows.
+
+#### Step 1: Create the IAM User
+1.  Log in to your **AWS Management Console**.
+2.  In the main search bar at the top, type **"IAM"** and select it from the results to navigate to the IAM dashboard.
+3.  In the left-hand navigation pane, click on **"Users"**.
+4.  Click the **"Create user"** button.
+5.  **User details:**
+    *   Enter a **User name** (e.g., `github-actions-deployer`).
+    *   Do **not** check the box for "Provide user access to the AWS Management Console". This user is for programmatic access only.
+    *   Click **"Next"**.
+6.  **Set permissions:**
+    *   Select **"Attach policies directly"**.
+    *   In the search box under "Permissions policies", type `AdministratorAccess`.
+    *   Check the box next to the `AdministratorAccess` policy.
+    *   **Note:** This is for simplicity in this exercise. In a real production environment, you should create a custom policy with the exact, least-privilege permissions required by the Terraform code.
+    *   Click **"Next"**.
+7.  **Review and create:**
+    *   Review the details to ensure the user name is correct and the `AdministratorAccess` policy is attached.
+    *   Click **"Create user"**.
+
+#### Step 2: Create and Retrieve Access Keys
+After the user is created, you will be redirected to the user list. You now need to generate the credentials.
+
+1.  From the user list, click on the name of the user you just created (e.g., `github-actions-deployer`).
+2.  On the user's summary page, click the **"Security credentials"** tab.
+3.  Scroll down to the **"Access keys"** section and click **"Create access key"**.
+4.  **Select use case:**
+    *   Choose **"Command Line Interface (CLI)"**. This is the most appropriate option for our use case, as it indicates the keys will be used for programmatic access from outside AWS.
+    *   Read and check the acknowledgment box.
+    *   Click **"Next"**.
+5.  **Set description tag (Optional):**
+    *   You can add a tag to help you identify this key later (e.g., `GitHub Actions Key`).
+    *   Click **"Create access key"**.
+6.  **Retrieve access keys:**
+    *   **IMPORTANT:** This is your only opportunity to view and save the secret access key.
+    *   You will see the **Access key ID** and the **Secret access key**.
+    *   Copy both values and save them somewhere secure (like a password manager). You will need them for the next step.
+    *   Click **"Done"**.
 
 ### 2.2: Get an Infracost API Key
 1.  Navigate to [https://www.infracost.io/](https://www.infracost.io/).
