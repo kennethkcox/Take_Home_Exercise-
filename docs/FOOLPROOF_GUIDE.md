@@ -26,16 +26,35 @@ You need a GitHub account to fork and manage the repository.
     ```
 
 ### 1.5: Install Local Tools
-*   **Terraform:** This is used to manage the infrastructure. The recommended way to install it is via `tfenv`, which allows you to manage multiple Terraform versions.
+
+#### For macOS & Linux
+*   **Git:** Comes pre-installed on most systems. If not, use your package manager (e.g., `sudo apt-get install git`).
+*   **Terraform:** The recommended way to install it is via `tfenv`, which manages multiple Terraform versions.
     *   **macOS:** `brew install tfenv`
     *   **Linux:** Follow the instructions at [https://github.com/tfutils/tfenv](https://github.com/tfutils/tfenv)
-    *   Once `tfenv` is installed, run `tfenv install` in the repository root. It will automatically pick up the version from the `.terraform-version` file.
-*   **Go:** This is required to run the IaC tests.
+    *   Once `tfenv` is installed, run `tfenv install` in the repository root to automatically install the correct version.
+*   **Go:** Required to run the IaC tests.
     *   **macOS:** `brew install go`
     *   **Linux:** `sudo apt-get install golang-go`
-*   **Infracost:** This is used to estimate cloud costs.
+*   **Infracost:** Used to estimate cloud costs.
     *   **macOS:** `brew install infracost`
     *   **Linux:** Follow the instructions at [https://www.infracost.io/docs/install/](https://www.infracost.io/docs/install/)
+
+#### For Windows
+The recommended way to install these tools on Windows is by using the [Chocolatey](https://chocolatey.org/install) package manager. Open a PowerShell terminal as an Administrator to run these commands.
+
+*   **Git:**
+    *   `choco install git`
+    *   *Alternative:* Download from [https://git-scm.com/download/win](https://git-scm.com/download/win).
+*   **Terraform:**
+    *   `choco install terraform`
+    *   *Alternative:* Download from [https://www.terraform.io/downloads.html](https://www.terraform.io/downloads.html).
+*   **Go:**
+    *   `choco install golang`
+    *   *Alternative:* Download from [https://golang.org/dl/](https://golang.org/dl/).
+*   **Infracost:**
+    *   `choco install infracost`
+    *   *Alternative:* Download from [https://www.infracost.io/docs/install/](https://www.infracost.io/docs/install/).
 
 ## Part 2: Configuring Secrets
 
