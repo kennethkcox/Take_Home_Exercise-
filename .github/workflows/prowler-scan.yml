@@ -10,7 +10,7 @@ jobs:
     name: 'Prowler Scan'
     runs-on: ubuntu-latest
     permissions:
-      security_events: write # Required to upload SARIF results
+      security-events: write # Required to upload SARIF results
 
     steps:
       - name: 'Checkout'
