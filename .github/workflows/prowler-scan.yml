@@ -1,0 +1,36 @@
+name: 'Prowler Security Scan'
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *' # Runs daily at 2 AM UTC
+
+jobs:
+  prowler-scan:
+    name: 'Prowler Scan'
+    runs-on: ubuntu-latest
+    permissions:
+      security_events: write # Required to upload SARIF results
+
+    steps:
+      - name: 'Checkout'
+        uses: actions/checkout@v3
+
+      - name: 'Configure AWS Credentials'
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: 'Install Prowler'
+        run: pip install prowler
+
+      - name: 'Run Prowler Scan'
+        run: prowler aws --output-formats sarif --output-directory . --output-filename prowler-report
+        continue-on-error: true # Continue so the report is always uploaded
+
+      - name: 'Upload SARIF report'
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'prowler-report.sarif'
