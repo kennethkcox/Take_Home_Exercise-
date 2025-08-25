@@ -56,65 +56,61 @@ The recommended way to install these tools on Windows is by using the [Chocolate
     *   `choco install infracost`
     *   *Alternative:* Download from [https://www.infracost.io/docs/install/](https://www.infracost.io/docs/install/).
 
-## Part 2: Configuring Secrets
+## Part 2: Configure AWS & GitHub for Deployment
 
-This is the most critical step. Our automated workflows need credentials to interact with AWS and other services. These are stored securely as GitHub Actions secrets.
+This is the most critical step. Instead of creating long-lived, insecure access keys, we will create a secure IAM Role in AWS that the GitHub Actions workflow can temporarily assume. This is a modern, secure best practice.
 
-### 2.1: Create AWS Credentials for Programmatic Access
+### 2.1: Create the IAM Deployment Role in AWS (One-Time Setup)
 
-These steps will guide you through creating a dedicated IAM user with the necessary permissions and credentials for the automated workflows.
+The repository includes a Terraform template to automate the creation of this role. You will need to run this once manually.
 
-#### Step 1: Create the IAM User
-1.  Log in to your **AWS Management Console**.
-2.  In the main search bar at the top, type **"IAM"** and select it from the results to navigate to the IAM dashboard.
-3.  In the left-hand navigation pane, click on **"Users"**.
-4.  Click the **"Create user"** button.
-5.  **User details:**
-    *   Enter a **User name** (e.g., `github-actions-deployer`).
-    *   Do **not** check the box for "Provide user access to the AWS Management Console". This user is for programmatic access only.
-    *   Click **"Next"**.
-6.  **Set permissions:**
-    *   Select **"Attach policies directly"**.
-    *   In the search box under "Permissions policies", type `AdministratorAccess`.
-    *   Check the box next to the `AdministratorAccess` policy.
-    *   **Note:** This is for simplicity in this exercise. In a real production environment, you should create a custom policy with the exact, least-privilege permissions required by the Terraform code.
-    *   Click **"Next"**.
-7.  **Review and create:**
-    *   Review the details to ensure the user name is correct and the `AdministratorAccess` policy is attached.
-    *   Click **"Create user"**.
+**Important Note:** Before starting, you must have your local environment authenticated to your AWS account (e.g., by running `aws configure` or setting environment variables).
 
-#### Step 2: Create and Retrieve Access Keys
-After the user is created, you will be redirected to the user list. You now need to generate the credentials.
+**Step 1: Create a Configuration File**
+1.  Navigate to the `terraform` directory in your local clone of the repository.
+2.  Create a new file named `setup.tfvars`.
+3.  Add the following content to the file, replacing the placeholder values with your GitHub username and the name of your forked repository:
+    ```hcl
+    # content for setup.tfvars
+    github_owner = "your-github-username"
+    github_repo  = "your-forked-repo-name"
+    ```
 
-1.  From the user list, click on the name of the user you just created (e.g., `github-actions-deployer`).
-2.  On the user's summary page, click the **"Security credentials"** tab.
-3.  Scroll down to the **"Access keys"** section and click **"Create access key"**.
-4.  **Select use case:**
-    *   Choose **"Command Line Interface (CLI)"**. This is the most appropriate option for our use case, as it indicates the keys will be used for programmatic access from outside AWS.
-    *   Read and check the acknowledgment box.
-    *   Click **"Next"**.
-5.  **Set description tag (Optional):**
-    *   You can add a tag to help you identify this key later (e.g., `GitHub Actions Key`).
-    *   Click **"Create access key"**.
-6.  **Retrieve access keys:**
-    *   **IMPORTANT:** This is your only opportunity to view and save the secret access key.
-    *   You will see the **Access key ID** and the **Secret access key**.
-    *   Copy both values and save them somewhere secure (like a password manager). You will need them for the next step.
-    *   Click **"Done"**.
+**Step 2: Apply the Terraform Configuration to Create the Role**
+1.  Open your terminal in the `terraform/` directory.
+2.  Run `terraform init` to initialize the Terraform providers.
+3.  Run the following command to create *only* the IAM role resources. This is a long command, but it uses the `-target` flag as a safety measure to ensure you don't accidentally try to deploy the whole application.
 
-### 2.2: Get an Infracost API Key
-1.  Navigate to [https://www.infracost.io/](https://www.infracost.io/).
-2.  Follow the steps to get a free API key. It's a quick process. Copy the API key you receive.
+    ```bash
+    terraform apply -var-file="setup.tfvars" \
+      -target=data.aws_caller_identity.current \
+      -target=data.aws_iam_policy_document.github_actions_trust_policy \
+      -target=resource.aws_iam_role.github_actions_deployer_role \
+      -target=data.aws_iam_policy_document.terraform_deployer_permissions \
+      -target=resource.aws_iam_policy.terraform_deployer_policy \
+      -target=resource.aws_iam_role_policy_attachment.deployer_attach
+    ```
+4.  Terraform will show you a plan and ask for confirmation. Type `yes` and press Enter.
+5.  After the command completes, it will output a value for `iam_role_arn_for_github`. **Copy this full ARN value.** You will need it in the next step.
 
-### 2.3: Add Secrets to Your GitHub Repository
+### 2.2: Configure Your GitHub Repository
+
+Now, you need to provide the ARN of the role and other configuration to your GitHub repository so the workflow can use them.
+
+**Step 1: Add Repository Variables**
 1.  Navigate to your forked repository on GitHub.
-2.  Click on **"Settings"** > **"Secrets and variables"** > **"Actions"**.
-3.  Click **"New repository secret"** for each of the following secrets:
-    *   **`AWS_ACCESS_KEY_ID`**: Paste the Access key ID you created in step 2.1.
-    *   **`AWS_SECRET_ACCESS_KEY`**: Paste the Secret access key you created in step 2.1.
-    *   **`INFRACOST_API_KEY`**: Paste the API key you got from Infracost in step 2.2.
+2.  Go to **"Settings"** > **"Secrets and variables"** > **"Actions"**.
+3.  Select the **"Variables"** tab.
+4.  Click **"New repository variable"** for each of the following:
+    *   `AWS_REGION`: The AWS region where you want to deploy the resources (e.g., `us-east-1`).
+    *   `IAM_ROLE_TO_ASSUME`: Paste the full ARN you copied from the Terraform output in the previous step.
 
-Your repository is now fully configured to run the automated workflows.
+**Step 2: Add the Infracost Secret**
+1.  While still in the "Actions" secrets and variables menu, select the **"Secrets"** tab.
+2.  Click **"New repository secret"** for the following secret:
+    *   `INFRACOST_API_KEY`: Get a free API key from [Infracost](https://www.infracost.io/docs/cloud_pricing/api_keys/) and paste it here. This is used by the CI pipeline to estimate costs.
+
+Your repository is now fully configured to run the automated workflows using a secure OIDC connection.
 
 ## Part 3: Your First Deployment (The GitOps Workflow)
 
@@ -166,7 +162,8 @@ git push origin my-first-change
 
 ### 3.7: Find Your Application
 Once the CD workflow is complete, the Juice Shop application is live. To find the URL:
-1.  Go to the completed "Edge Security CD" workflow run.
-2.  Look at the output of the "Get ALB DNS Name" step. It will contain the public URL for your application.
+1.  Go to the **"Actions"** tab in your repository and click on the completed "Edge Security CD" workflow run.
+2.  The application URL is printed in the **summary** of the run, at the top of the page.
+3.  You can also find it in the logs of the "Get ALB DNS Name" step.
 
 Congratulations! You have successfully deployed a state-of-the-art, self-defending cloud security platform.
