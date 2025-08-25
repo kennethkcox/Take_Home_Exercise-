@@ -50,4 +50,4 @@ The platform consists of three key interacting systems: The CI/CD Pipeline for a
 
 The deployment is fully automated. Simply create a pull request with a change to the `terraform/` directory and merge it to `main` after the CI checks pass. The CD workflow will handle the rest.
 
-For details on running the scripts and understanding the operational aspects, see the original [runbook-style README](docs/original_readme.md).
+For details on running the scripts and understanding the operational aspects, see the original [runbook-style README](docs/original_readme.md). (Note: I will move the old README there).

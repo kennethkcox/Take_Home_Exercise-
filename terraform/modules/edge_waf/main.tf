@@ -1,6 +1,6 @@
 resource "aws_wafv2_web_acl" "main" {
   name        = "${var.project_name}-waf"
-  scope       = "REGIONAL"
+  scope       = var.scope
   default_action {
     allow {}
   }
@@ -89,6 +89,27 @@ resource "aws_wafv2_web_acl" "main" {
     }
   }
 
+  dynamic "rule" {
+    for_each = var.custom_rules
+    content {
+      name     = rule.value.name
+      priority = rule.value.priority
+      action {
+        block {}
+      }
+      statement {
+        ip_set_reference_statement {
+          arn = rule.value.ip_set_arn
+        }
+      }
+      visibility_config {
+        cloudwatch_metrics_enabled = true
+        metric_name                = rule.value.name
+        sampled_requests_enabled   = true
+      }
+    }
+  }
+
   visibility_config {
     cloudwatch_metrics_enabled = true
     metric_name                = "waf-metrics"
@@ -97,11 +118,13 @@ resource "aws_wafv2_web_acl" "main" {
 }
 
 resource "aws_wafv2_web_acl_association" "main" {
-  resource_arn = var.alb_arn
+  resource_arn = var.resource_arn
   web_acl_arn  = aws_wafv2_web_acl.main.arn
 }
 
 resource "aws_wafv2_web_acl_logging_configuration" "main" {
+  count = var.log_destination_arn != null ? 1 : 0
+
   log_destination_configs = [var.log_destination_arn]
   resource_arn            = aws_wafv2_web_acl.main.arn
 }
